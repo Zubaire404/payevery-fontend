@@ -16,13 +16,12 @@ export default function Dashboard() {
   const [aiMessage, setAiMessage] = useState({ type: "", text: "" });
   const [generatedCard, setGeneratedCard] = useState("");
 
-  // 🔴 NEW: পিন ও ওটিপি ভেরিফিকেশনের জন্য নতুন স্টেট
   const [isVerificationOpen, setIsVerificationOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [otp, setOtp] = useState("");
 
   useEffect(() => {
-    const user = localStorage.getItem("loggedInUser") || "Sohel";
+    const user = localStorage.getItem("loggedInUser") || "Sohel Faruque Rahman";
     setUsername(user);
     fetchUserBalance(user);
   }, []);
@@ -39,9 +38,17 @@ export default function Dashboard() {
     }
   };
 
-  // 🔴 আসল API কলিং ফাংশন (এটি এখন পিন/ওটিপি দেওয়ার পর কল হবে)
   const handleAIAnalyze = async () => {
     if (!websiteLink || !amount) return;
+
+    // 🔴 NEW: Hardcoded Security Check (Hackathon Demo)
+    if (pin !== "1234" || otp !== "123456") {
+      setAiMessage({ type: "error", text: "❌ Invalid PIN or OTP! Access Denied." });
+      setPin(""); 
+      setOtp(""); 
+      return; 
+    }
+
     setIsAnalyzing(true);
     setAiMessage({ type: "", text: "" });
     
@@ -72,8 +79,8 @@ export default function Dashboard() {
       setAiMessage({ type: "error", text: "❌ Backend Error! Is FastAPI running?" });
     } finally {
       setIsAnalyzing(false);
-      setPin(""); // প্রসেস শেষ হলে পিন ক্লিয়ার করা
-      setOtp(""); // প্রসেস শেষ হলে ওটিপি ক্লিয়ার করা
+      setPin(""); 
+      setOtp(""); 
     }
   };
 
@@ -87,12 +94,18 @@ export default function Dashboard() {
             <h1 className="text-2xl font-extrabold text-gray-900">Pay<span className="text-blue-600">Every</span></h1>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm font-bold text-gray-700">Hello, {username}! 👋</span>
+            
+            <Link href="/squad-pay" className="px-5 py-2 text-sm font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-full transition-colors flex items-center gap-2 border border-indigo-100">
+              ⚡ Squad Pay
+            </Link>
+
+            <span className="text-sm font-bold text-gray-700 hidden md:block">Hello, {username}! 👋</span>
+            
             <Link href="/login" className="px-5 py-2 text-sm font-bold text-red-500 bg-red-50 hover:bg-red-100 rounded-full transition-colors">
               Logout
             </Link>
           </div>
-        </div>
+        </div>    
       </nav>
 
       <main className="max-w-6xl mx-auto p-6 md:p-10">
@@ -141,7 +154,6 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* 🔴 NEW: ক্লিক করলে এখন সরাসরি AI কল না হয়ে Verification Modal ওপেন হবে */}
             <button 
               onClick={() => setIsVerificationOpen(true)} 
               disabled={!websiteLink || !amount || isAnalyzing} 
@@ -177,7 +189,7 @@ export default function Dashboard() {
 
       <PaymentModal isOpen={isPaymentOpen} onClose={() => setIsPaymentOpen(false)} cardNumber={generatedCard} />
 
-      {/* 🔴 NEW: Security Verification Modal (PIN & OTP) */}
+      {/* Security Verification Modal (PIN & OTP) */}
       {isVerificationOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
@@ -186,8 +198,12 @@ export default function Dashboard() {
             </button>
             
             <h3 className="text-2xl font-black text-gray-900 mb-2">Security Verification</h3>
+            
+            {/* 🔴 NEW: Demo PIN & OTP Hint */}
             <p className="text-gray-500 font-medium mb-6">
               Enter your PIN and OTP to authorize this payment.
+              <br/>
+              <span className="text-xs text-blue-500 font-bold">(Demo PIN: 1234, OTP: 123456)</span>
             </p>
 
             <div className="space-y-5 mb-8">
@@ -223,10 +239,10 @@ export default function Dashboard() {
 
             <button
               onClick={() => {
-                setIsVerificationOpen(false); // মডাল বন্ধ হবে
-                handleAIAnalyze(); // এরপর টাকা কাটা ও কার্ড জেনারেট হওয়ার আসল কলটি যাবে
+                setIsVerificationOpen(false); 
+                handleAIAnalyze(); 
               }}
-              disabled={pin.length < 4 || otp.length < 6} // পিন ৪টি ও ওটিপি ৬টি না হওয়া পর্যন্ত বাটন লক থাকবে
+              disabled={pin.length < 4 || otp.length < 6} 
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg"
             >
               Verify & Proceed

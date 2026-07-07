@@ -1,76 +1,115 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+import Link from "next/link"; // 🔴 NEW: Link ইমপোর্ট করা হয়েছে
 
 export default function Login() {
+  // 🔴 FIX: ডিফল্ট নাম ফাঁকা রাখা হলো
   const [username, setUsername] = useState("");
-  const [pin, setPin] = useState(""); // 🔴 ডামি PIN-এর জন্য স্টেট
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    // PIN চেক করার কোনো লজিক নেই, নাম থাকলেই ড্যাশবোর্ডে চলে যাবে
-    if (username.trim()) {
-      localStorage.setItem("loggedInUser", username);
-      router.push("/dashboard");
+    setError("");
+    
+    if (!username.trim() || pin.length < 4) {
+      setError("⚠️ Please enter a valid username and 4-digit PIN.");
+      return;
     }
+
+    setIsLoading(true);
+
+    // Security Check (Hackathon Demo)
+    setTimeout(() => {
+      if (pin === "1234") {
+        localStorage.setItem("loggedInUser", username);
+        router.push("/dashboard");
+      } else {
+        setError("❌ Invalid PIN! Please use the demo PIN: 1234");
+        setPin(""); // ভুল পিন দিলে বক্স ফাঁকা করে দেবে
+        setIsLoading(false);
+      }
+    }, 1500); 
   };
 
   return (
-    <div className="flex justify-center items-center h-screen bg-[#f4f7fe] text-gray-900 font-sans relative overflow-hidden">
+    <div className="min-h-screen bg-[#f4f7fe] flex items-center justify-center p-4 relative overflow-hidden">
       
       {/* Background Decorative Elements */}
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-400 opacity-20 rounded-full blur-3xl"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-indigo-500 opacity-20 rounded-full blur-3xl"></div>
+      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
+      <div className="absolute top-[-10%] right-[-10%] w-96 h-96 bg-indigo-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
+      <div className="absolute bottom-[-20%] left-[20%] w-96 h-96 bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
 
-      <div className="bg-white p-10 rounded-3xl shadow-[0_20px_50px_rgba(8,_112,_184,_0.07)] border border-gray-100 w-[400px] z-10 relative">
+      <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-10 w-full max-w-md relative z-10 border border-gray-100">
         
-        <div className="flex flex-col items-center justify-center mb-8">
-          <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center text-white font-black text-3xl shadow-lg mb-3">P</div>
-          <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight">Pay<span className="text-blue-600">Every</span></h2>
-          <p className="text-gray-500 text-sm mt-2 font-medium">Log in to your smart wallet</p>
+        {/* Logo & Header */}
+        <div className="flex flex-col items-center mb-10">
+          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white font-black text-3xl shadow-lg mb-4 transform transition-transform hover:scale-105">
+            P
+          </div>
+          <h1 className="text-3xl font-extrabold text-gray-900">Pay<span className="text-blue-600">Every</span></h1>
+          <p className="text-gray-500 font-medium mt-2 text-center">Secure AI-powered payments for squads & professionals.</p>
         </div>
-        
-        <form onSubmit={handleLogin}>
-          <div className="mb-5">
-            <label className="block text-gray-700 text-sm font-bold mb-2">Username or Phone </label>
+
+        {/* Login Form */}
+        <form onSubmit={handleLogin} className="space-y-6">
+          
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2 uppercase tracking-wide">Username</label>
             <input 
               type="text" 
-              required
-              value={username}
+              value={username} 
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-3.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 text-gray-900 font-semibold outline-none transition-all" 
-              placeholder="e.g. Sohel, Rifat, Hasan" 
+              className="w-full px-5 py-4 border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 font-bold text-gray-900 outline-none transition-all" 
+              placeholder="e.g., Sohel, Rifat, Ratul" 
+              required
             />
           </div>
 
-          {/* 🔴 NEW: Dummy PIN Box */}
-          <div className="mb-8">
-            <label className="block text-gray-700 text-sm font-bold mb-2">Secure PIN</label>
+          <div>
+            <label className="block text-gray-700 text-sm font-bold mb-2 uppercase tracking-wide">4-Digit PIN</label>
             <input 
               type="password" 
-              required
               maxLength={4}
               value={pin}
-              // শুধু নম্বর টাইপ করতে পারবে, অন্য কোনো ক্যারেক্টার নয়
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} 
-              className="w-full px-4 py-3.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 text-gray-900 font-black text-xl tracking-[0.5em] text-center outline-none transition-all placeholder:tracking-normal placeholder:text-sm placeholder:font-medium" 
-              placeholder="4-digit PIN" 
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+              className="w-full px-5 py-4 border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 text-center tracking-[0.5em] font-black text-2xl outline-none transition-all" 
+              placeholder="••••" 
+              required
             />
+            <p className="text-xs text-blue-500 mt-2 font-bold text-right">(Demo PIN: 1234)</p>
           </div>
 
-          <button type="submit" className="w-full bg-blue-600 text-white font-bold py-4 px-4 rounded-xl hover:bg-blue-700 shadow-[0_8px_20px_rgb(37,99,235,0.25)] hover:shadow-[0_8px_25px_rgb(37,99,235,0.4)] transition-all flex justify-center items-center gap-2 text-lg">
-            Log in
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+          {error && (
+            <div className="bg-red-50 text-red-600 font-bold p-4 rounded-xl border border-red-200 text-sm flex items-center gap-2 animate-pulse">
+              {error}
+            </div>
+          )}
+
+          <button 
+            type="submit" 
+            disabled={isLoading || pin.length < 4 || !username}
+            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-70 disabled:cursor-not-allowed text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 flex items-center justify-center gap-2"
+          >
+            {isLoading ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Authenticating...
+              </>
+            ) : "Secure Login"}
           </button>
         </form>
 
-        {/* 🔴 NEW: Dummy Sign Up Link */}
+        {/* 🔴 FIX: Sign Up Link Added Back */}
         <div className="mt-8 text-center pt-6 border-t border-gray-100">
           <p className="text-sm text-gray-500 font-medium">
             Don't have an account?{" "}
-            {/* 🔴 Alert মুছে Next.js এর Link ব্যবহার করা হলো */}
             <Link 
               href="/signup" 
               className="text-blue-600 font-bold hover:text-blue-800 transition-colors"
