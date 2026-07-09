@@ -3,7 +3,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-const API = "http://127.0.0.1:8000";
+const API = "http://https://payevery-backend.onrender.com/";
 
 export default function Login() {
   const [step, setStep] = useState<1 | 2>(1);
