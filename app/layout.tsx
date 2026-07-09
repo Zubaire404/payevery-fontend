@@ -1,8 +1,10 @@
 import "./globals.css";
+import type { Metadata } from "next";
 
-export const metadata = {
-  title: "PayEvery",
-  description: "Modern Fintech Dashboard",
+export const metadata: Metadata = {
+  title: "PayEvery — Smart International Payments for Bangladesh",
+  description: "PayEvery connects local wallets (bKash, Nagad) to generate one-time virtual dollar cards for international SaaS subscriptions, AI tools, and software payments — no dual-currency bank card needed.",
+  keywords: "bKash, Nagad, virtual card, international payment, Bangladesh, SaaS, AI subscription, PayEvery",
 };
 
 export default function RootLayout({
@@ -13,10 +15,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        {/* 🔴 দ্য চিট কোড: এটি ইন্টারনেট থেকে সরাসরি আপনার ডিজাইন রেন্ডার করবে! */}
         <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+        <style>{`* { font-family: 'Inter', sans-serif; }`}</style>
       </head>
-      <body className="bg-[#f4f7fe] text-gray-900">{children}</body>
+      <body className="bg-slate-950 text-slate-300 antialiased">{children}</body>
     </html>
   );
 }

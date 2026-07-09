@@ -3,6 +3,18 @@
 @tailwind utilities;
 
 body {
-  background-color: #f4f7fe;
-  color: #111827;
+  background-color: #020617; /* slate-950 */
+  color: #cbd5e1; /* slate-300 */
 }
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* Smooth scroll */
+html { scroll-behavior: smooth; }
+
+/* Selection color */
+::selection { background-color: rgba(99, 102, 241, 0.3); }
