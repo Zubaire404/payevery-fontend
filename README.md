@@ -21,8 +21,7 @@ In South Asian nations like Bangladesh and Pakistan, major global payment networ
 ## ⚠️ Limitations (Hackathon Scope)
 As this project was developed within the strict timeframe of the AMD Developer Hackathon Act-II, the current build has a few limitations:
 *   **Simulated Card Generation:** Due to financial regulations and the lack of live banking API licenses, the virtual cards generated in the frontend are dummy/simulated data used for proof-of-concept (POC) purposes. No real monetary deduction occurs.
-*   **Hardcoded MFS Integrations:** The connections to local mobile wallets (like bKash/Nagad) bypass OTP authentication for the sake of the live demo.
-*   **Mocked Checkout Environment:** The AI scam detection currently runs via terminal/input prompts rather than intercepting a live payment gateway's backend payload.
+*   **Hardcoded MFS Integrations:** The connections to local mobile wallets (like bKash/Nagad) bypass OTP authenticatio for the sake of the live demo.
 
 ---
 
