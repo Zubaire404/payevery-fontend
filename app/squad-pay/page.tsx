@@ -1,382 +1,715 @@
 "use client";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import PaymentModal from "../components/PaymentModal";
 
-// ----------------------------------------------------------------------
-// Types & Interfaces
-// ----------------------------------------------------------------------
-interface SquadMember {
-  id: number;
-  name: string;
-  initials: string;
-  inputAmount: string | number;
-  isLoadingRequest: boolean;
-  hasContributed: boolean;
-  hasPaid: boolean; // 🔴 NEW: Pay অপশনের স্টেট
-  avatarColor: string;
+const API = "http://127.0.0.1:8000";
+const CURRENCIES = ["USD", "BDT", "EUR", "GBP", "INR"];
+
+interface CardDetails { number: string; expiry: string; cvv?: string; }
+interface Contribution { username: string; amount_bdt: number; paid_at: string; }
+interface PoolDetails {
+  pool_code: string; leader: string; leader_name: string;
+  target_url: string; total_amount: number; currency: string;
+  total_bdt: number; collected_bdt: number; remaining_bdt: number;
+  remaining_amount: number; progress_pct: number; status: string;
+  description: string; contributions: Contribution[];
+  virtual_card?: string; expiry?: string; cvv?: string;
+}
+interface MyPool {
+  pool_code: string; description: string; target_url: string;
+  total_amount: number; currency: string; total_bdt: number;
+  collected_bdt: number; progress_pct: number; status: string;
+  is_leader: boolean; leader: string; date: string;
 }
 
+type Tab = "create" | "join" | "my-pools";
+type Step = "form" | "scan" | "verify" | "done";
+
 export default function SquadPay() {
-  const [username, setUsername] = useState("Loading...");
-  
-  // রিয়েল ডাটাবেস ব্যালেন্স
-  const [balances, setBalances] = useState({ bkash: 0, nagad: 0, rocket: 0, total: 0 });
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [balances, setBalances] = useState({ bkash: 0, nagad: 0, total: 0, total_usd: 0 });
+  const [rates, setRates] = useState<Record<string, number>>({ BDT: 1, USD: 110 });
 
-  // ডামি ইউজার লিস্ট (Request এবং Pay দুটির জন্যই)
-  const [squad, setSquad] = useState<SquadMember[]>([
-    { id: 1, name: "Alice Rahman", initials: "AR", inputAmount: 10.00, isLoadingRequest: false, hasContributed: false, hasPaid: false, avatarColor: "bg-pink-500" },
-    { id: 2, name: "Bob Hossain", initials: "BH", inputAmount: 20.00, isLoadingRequest: false, hasContributed: false, hasPaid: false, avatarColor: "bg-orange-500" },
-    { id: 3, name: "Charlie Khan", initials: "CK", inputAmount: 5.00, isLoadingRequest: false, hasContributed: false, hasPaid: false, avatarColor: "bg-emerald-500" },
-  ]);
+  const [activeTab, setActiveTab] = useState<Tab>("create");
 
-  // ওয়েবসাইটের চেকআউটের জন্য স্টেট (ড্যাশবোর্ডের মতো)
-  const [websiteLink, setWebsiteLink] = useState("");
-  const [checkoutAmount, setCheckoutAmount] = useState<number | string>(35.0); 
-  const [currency, setCurrency] = useState("USD");
-
-  // 🔴 NEW: পেমেন্ট ও ভেরিফিকেশন স্টেট
-  const [activeMember, setActiveMember] = useState<SquadMember | null>(null); // বন্ধুকে পে করার ট্র্যাক রাখতে
-  const [isVerificationOpen, setIsVerificationOpen] = useState(false);
-  const [pin, setPin] = useState("");
-  const [otp, setOtp] = useState("");
+  // --- Create Pool State ---
+  const [createForm, setCreateForm] = useState({
+    description: "", target_url: "", total_amount: "", currency: "USD",
+  });
+  const [createStep, setCreateStep] = useState<Step>("form");
+  const [scanResult, setScanResult] = useState<{ score: number; text: string; type: string } | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  
+  const [createdPool, setCreatedPool] = useState<PoolDetails | null>(null);
+
+  // --- Join / Contribute State ---
+  const [joinCode, setJoinCode] = useState("");
+  const [joinedPool, setJoinedPool] = useState<PoolDetails | null>(null);
+  const [joinLoading, setJoinLoading] = useState(false);
+
+  // --- My Pools ---
+  const [myPools, setMyPools] = useState<MyPool[]>([]);
+  const [myPoolsLoading, setMyPoolsLoading] = useState(false);
+  const [selectedPool, setSelectedPool] = useState<PoolDetails | null>(null);
+
+  // --- Auth (PIN + OTP) for Contribute / Execute ---
+  const [authPin, setAuthPin] = useState("");
+  const [authOtp, setAuthOtp] = useState("");
+  const [authDemoOtp, setAuthDemoOtp] = useState("");
+  const [authPhone, setAuthPhone] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyTarget, setVerifyTarget] = useState<"contribute" | "execute" | null>(null);
+  const [verifyPoolCode, setVerifyPoolCode] = useState("");
+
+  // --- Payment Card Modal ---
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
-  const [generatedCard, setGeneratedCard] = useState("");
-  const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' | 'info' }>({ show: false, message: "", type: 'success' });
+  const [card, setCard] = useState<CardDetails>({ number: "", expiry: "" });
+
+  const pinRef = useRef<HTMLInputElement>(null);
+  const otpRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const user = localStorage.getItem("loggedInUser") || "Sohel Faruque Rahman";
+    const user = localStorage.getItem("loggedInUser") || "sohel";
     setUsername(user);
-    fetchUserBalance(user);
+    fetchUser(user);
   }, []);
 
-  const fetchUserBalance = async (user: string) => {
+  useEffect(() => {
+    if (activeTab === "my-pools" && username) fetchMyPools();
+  }, [activeTab, username]);
+
+  const fetchUser = async (user: string) => {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/user/${user}`);
+      const res = await fetch(`${API}/api/user/${user}`);
       if (res.ok) {
-        const data = await res.json();
-        setBalances(data);
+        const d = await res.json();
+        setBalances({ bkash: d.bkash, nagad: d.nagad, total: d.total, total_usd: d.total_usd });
+        setDisplayName(d.name || user);
+        if (d.exchange_rates) setRates(d.exchange_rates);
       }
-    } catch (err) {
-      console.error("Failed to fetch balance");
-    }
+    } catch { /* silent */ }
   };
 
-  const handleAmountChange = (id: number, value: string) => {
-    setSquad((prev) => prev.map((m) => m.id === id ? { ...m, inputAmount: value } : m));
-  };
-
-  // 🔴 Function 1: Request Funds (পুনরায় রিকোয়েস্ট করার লজিকসহ)
-  const handleRequestFunds = (memberId: number, name: string, inputAmount: string | number) => {
-    const amount = parseFloat(inputAmount as string);
-    if (!amount || amount <= 0) return;
-
-    setSquad((prev) => prev.map((m) => (m.id === memberId ? { ...m, isLoadingRequest: true } : m)));
-
-    setTimeout(() => {
-      const amountInBdt = amount * 120; // ডেমো ম্যাজিক: ব্যালেন্স বাড়ানো হচ্ছে
-      setBalances((prev) => ({
-        ...prev,
-        bkash: prev.bkash + amountInBdt, 
-        total: prev.total + amountInBdt
-      }));
-
-      // সফল হওয়ার পর hasContributed true করা হলো
-      setSquad((prev) => prev.map((m) => m.id === memberId ? { ...m, isLoadingRequest: false, hasContributed: true } : m));
-      
-      setToast({ show: true, message: `✅ Request granted! $${amount.toFixed(2)} added to your balance.`, type: 'info' });
-      setTimeout(() => setToast({ show: false, message: "", type: 'info' }), 4000);
-
-      // 🔴 NEW: ৩ সেকেন্ড পর বাটনটি আবার আগের অবস্থায় ফিরে আসবে (Reusable)
-      setTimeout(() => {
-        setSquad((prev) => prev.map((m) => m.id === memberId ? { ...m, hasContributed: false } : m));
-      }, 3000);
-
-    }, 1500);
-  };
-
-  // 🔴 Function 2: Initiate Friend Payment
-  const initiateFriendPayment = (member: SquadMember) => {
-    const amount = parseFloat(member.inputAmount as string);
-    if (!amount || amount <= 0) return;
-    setActiveMember(member);
-    setIsVerificationOpen(true);
-  };
-
-  // 🔴 Function 3: Initiate Website Checkout
-  const initiateWebsitePayment = () => {
-    if (!websiteLink || !checkoutAmount) return;
-    setActiveMember(null); // ওয়েবসাইটের ক্ষেত্রে activeMember null থাকবে
-    setIsVerificationOpen(true);
-  };
-
-  // 🔴 Function 4: Execute Payment (বন্ধু বা ওয়েবসাইট উভয়ের জন্য)
-  const executePayment = async () => {
-    // 🔴 Security Check (Hackathon Demo PIN/OTP)
-    if (pin !== "1234" || otp !== "123456") {
-      setToast({ show: true, message: "❌ Invalid PIN or OTP! Access Denied.", type: 'error' });
-      setTimeout(() => setToast({ show: false, message: "", type: 'error' }), 3000);
-      return; 
-    }
-
-    setIsVerificationOpen(false); 
-    setIsAnalyzing(true);
-    
-    // বন্ধুকে পে করলে একটি ডামি লোকাল URL, ওয়েবসাইটের ক্ষেত্রে আসল URL
-    const targetUrl = activeMember ? `https://squadpay.local/transfer/${activeMember.name.replace(/\s+/g, '').toLowerCase()}` : websiteLink;
-    const amountToPay = activeMember ? parseFloat(activeMember.inputAmount as string) : parseFloat(checkoutAmount as string);
-    const payCurrency = activeMember ? "USD" : currency;
-
+  const fetchMyPools = async () => {
+    setMyPoolsLoading(true);
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/split-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch(`${API}/api/squad/my-pools/${username}`);
+      if (res.ok) setMyPools(await res.json());
+    } catch { /* silent */ }
+    finally { setMyPoolsLoading(false); }
+  };
+
+  const requestOtp = async (u: string) => {
+    const res = await fetch(`${API}/api/payment/request-otp`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: u }),
+    });
+    const d = await res.json();
+    if (res.ok) { setAuthDemoOtp(d.demo_otp); setAuthPhone(d.phone); }
+  };
+
+  // ────────────────────────────── CREATE POOL FLOW ──────────────────────────
+  const handleScanUrl = async () => {
+    if (!createForm.target_url || !createForm.total_amount) return;
+    setIsAnalyzing(true); setScanResult(null);
+    try {
+      const res = await fetch(`${API}/api/check-url?url=${encodeURIComponent(createForm.target_url)}`);
+      const d = await res.json();
+      setScanResult({
+        type: d.score >= 60 ? "success" : "error",
+        text: d.score >= 60
+          ? `✅ Verified Safe. Trust Score: ${d.score}/100. ${d.reason}`
+          : `⚠️ Low Trust Score (${d.score}/100). ${d.reason}`,
+        score: d.score,
+      });
+      setCreateStep("scan");
+    } catch { setScanResult({ type: "error", text: "❌ Backend connection failed.", score: -1 }); setCreateStep("scan"); }
+    finally { setIsAnalyzing(false); }
+  };
+
+  const handleCreatePool = async () => {
+    try {
+      const res = await fetch(`${API}/api/squad/create-pool`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: username,
-          target_url: targetUrl, 
-          amount: amountToPay, 
-          currency: payCurrency
+          leader_username: username,
+          target_url: createForm.target_url,
+          total_amount: parseFloat(createForm.total_amount),
+          currency: createForm.currency,
+          description: createForm.description,
         }),
       });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setGeneratedCard(data.virtual_card);
-        fetchUserBalance(username); 
-        
-        // যদি বন্ধুকে পে করা হয়, তবে তার বাটনটি Paid করে দেওয়া (৩ সেকেন্ড পর আবার রিসেট হবে)
-        if (activeMember) {
-          setSquad(prev => prev.map(m => m.id === activeMember.id ? { ...m, hasPaid: true } : m));
-          setTimeout(() => {
-            setSquad(prev => prev.map(m => m.id === activeMember.id ? { ...m, hasPaid: false } : m));
-          }, 3000);
-        }
-
-        setToast({ show: true, message: `✅ ${data.ai_safety_status}! Paid Securely. Card ${data.virtual_card} generated.`, type: 'success' });
-        setTimeout(() => setToast({ show: false, message: "", type: 'success' }), 4000);
-        
-        setTimeout(() => setIsPaymentOpen(true), 1500);
-      } else {
-        setToast({ show: true, message: `🚨 ${data.detail}`, type: 'error' });
-        setTimeout(() => setToast({ show: false, message: "", type: 'error' }), 4000);
-      }
-    } catch (error) {
-      setToast({ show: true, message: "❌ Backend Error! Is FastAPI running?", type: 'error' });
-      setTimeout(() => setToast({ show: false, message: "", type: 'error' }), 4000);
-    } finally {
-      setIsAnalyzing(false);
-      setPin("");
-      setOtp("");
-      setActiveMember(null);
-    }
+      const d = await res.json();
+      if (!res.ok) { alert(`Error: ${d.detail}`); return; }
+      // Now fetch full pool details
+      const pr = await fetch(`${API}/api/squad/pool/${d.pool_code}`);
+      setCreatedPool(await pr.json());
+      setCreateStep("done");
+      fetchMyPools();
+    } catch { alert("❌ Backend connection failed."); }
   };
 
-  return (
-    <div className="min-h-screen bg-[#f4f7fe] text-gray-900 font-sans pb-10 relative overflow-hidden">
-      
-      {toast.show && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 animate-bounce">
-          <div className={`px-6 py-3 rounded-full font-bold shadow-xl flex items-center gap-2 border 
-            ${toast.type === 'success' ? 'bg-green-100 border-green-500 text-green-700' : 
-              toast.type === 'error' ? 'bg-red-100 border-red-500 text-red-700' : 
-              'bg-blue-100 border-blue-500 text-blue-700'}`}>
-            {toast.message}
-          </div>
-        </div>
-      )}
+  // ────────────────────────────── JOIN / CONTRIBUTE FLOW ────────────────────
+  const handleLookupPool = async () => {
+    if (!joinCode.trim()) return;
+    setJoinLoading(true);
+    try {
+      const res = await fetch(`${API}/api/squad/pool/${joinCode.trim().toUpperCase()}`);
+      if (!res.ok) { alert("Pool not found. Check the code and try again."); return; }
+      setJoinedPool(await res.json());
+    } catch { alert("❌ Backend connection failed."); }
+    finally { setJoinLoading(false); }
+  };
 
-      <nav className="bg-white px-6 py-4 shadow-sm sticky top-0 z-10 border-b border-gray-100">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
+  const openVerify = async (target: "contribute" | "execute", code: string) => {
+    setVerifyTarget(target);
+    setVerifyPoolCode(code);
+    setAuthPin(""); setAuthOtp(""); setAuthDemoOtp(""); setAuthPhone("");
+    setIsVerifying(true);
+    await requestOtp(username);
+    setTimeout(() => pinRef.current?.focus(), 100);
+  };
+
+  const handleContribute = async () => {
+    try {
+      const res = await fetch(`${API}/api/squad/contribute`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pool_code: verifyPoolCode, contributor_username: username, pin: authPin, otp: authOtp }),
+      });
+      const d = await res.json();
+      if (!res.ok) { alert(`❌ ${d.detail}`); return; }
+      alert(`✅ ${d.message}`);
+      setIsVerifying(false);
+      fetchUser(username);
+      // Refresh pool
+      const pr = await fetch(`${API}/api/squad/pool/${verifyPoolCode}`);
+      if (joinedPool?.pool_code === verifyPoolCode) setJoinedPool(await pr.json());
+      if (selectedPool?.pool_code === verifyPoolCode) setSelectedPool(await pr.json());
+      fetchMyPools();
+    } catch { alert("❌ System error."); }
+  };
+
+  const handleExecute = async () => {
+    try {
+      const res = await fetch(`${API}/api/squad/execute`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pool_code: verifyPoolCode, leader_username: username, pin: authPin, otp: authOtp }),
+      });
+      const d = await res.json();
+      if (!res.ok) { alert(`❌ ${d.detail}`); return; }
+      setCard({ number: d.virtual_card, expiry: d.expiry, cvv: d.cvv });
+      setIsVerifying(false);
+      fetchUser(username);
+      fetchMyPools();
+      // Refresh pool details
+      const pr = await fetch(`${API}/api/squad/pool/${verifyPoolCode}`);
+      const updated = await pr.json();
+      if (selectedPool?.pool_code === verifyPoolCode) setSelectedPool(updated);
+      setTimeout(() => setIsPaymentOpen(true), 500);
+    } catch { alert("❌ System error."); }
+  };
+
+  const handleVerifySubmit = () => {
+    if (authPin.length < 4 || authOtp.length < 6) return;
+    if (verifyTarget === "contribute") handleContribute();
+    else handleExecute();
+  };
+
+  const logout = () => { localStorage.removeItem("loggedInUser"); window.location.href = "/login"; };
+
+  const statusColor = (s: string) =>
+    s === "COMPLETED" ? "text-emerald-400 bg-emerald-900/30 border-emerald-500/30"
+    : s === "FUNDED" ? "text-blue-400 bg-blue-900/30 border-blue-500/30"
+    : s === "OPEN" ? "text-purple-400 bg-purple-900/30 border-purple-500/30"
+    : "text-slate-400 bg-slate-800/30 border-slate-700/30";
+
+  const scoreColor = (s: number) => s >= 80 ? "bg-emerald-500" : s >= 50 ? "bg-amber-500" : "bg-red-500";
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-300 font-sans pb-16 relative overflow-hidden">
+      {/* Glowing Orbs */}
+      <div className="absolute top-[-20%] right-[-10%] w-[800px] h-[800px] bg-purple-600/10 rounded-full blur-[150px] pointer-events-none" />
+      <div className="absolute bottom-[-20%] left-[-10%] w-[800px] h-[800px] bg-fuchsia-600/10 rounded-full blur-[150px] pointer-events-none" />
+
+      {/* Navbar */}
+      <nav className="bg-slate-950/50 backdrop-blur-3xl sticky top-0 z-40 border-b border-slate-800/50">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-md">P</div>
-            <h1 className="text-2xl font-extrabold text-gray-900">Pay<span className="text-blue-600">Every</span></h1>
+            <img src="/logo.png" alt="PayEvery" className="w-16 h-16 object-contain -ml-2 -my-4 drop-shadow-[0_0_15px_rgba(168,85,247,0.5)]" />
+            <h1 className="text-xl font-bold text-white">Pay<span className="text-purple-500">Every</span></h1>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm font-bold text-gray-700 hidden md:block">Hello, {username}! 👋</span>
-            <Link href="/dashboard" className="px-5 py-2 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors flex items-center gap-2">
-              ← Back
+            <Link href="/dashboard" className="px-4 py-2 text-sm font-semibold text-white hover:text-purple-400 bg-slate-800/50 hover:bg-slate-800 border border-slate-700/50 rounded-full transition-all">
+              ← Dashboard
             </Link>
+            <div className="h-4 w-[1px] bg-slate-700 hidden md:block" />
+            <span className="text-sm text-slate-400 hidden md:block">Welcome, <span className="text-white">{displayName || username}</span></span>
+            <button onClick={logout} className="text-sm text-slate-500 hover:text-red-400 transition-colors">Sign out</button>
           </div>
         </div>
       </nav>
 
-      <main className="max-w-6xl mx-auto p-6 md:p-10">
-        
-        <div className="mb-8 flex flex-col md:flex-row md:items-center gap-4 justify-between">
-          <div>
-            <h2 className="text-3xl md:text-4xl font-black text-gray-900 mb-2">Squad Pay ⚡</h2>
-            <p className="text-gray-500 font-medium">Pool funds from friends, pay them directly, or safely pay shared bills with AI verification.</p>
-          </div>
-        </div>
+      <main className="max-w-7xl mx-auto px-6 mt-10 relative z-10">
 
-        {/* Real Database Balance Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-          <div className="col-span-1 md:col-span-3 lg:col-span-1 bg-gradient-to-br from-indigo-600 to-purple-800 p-6 rounded-2xl shadow-xl text-white transition-all transform hover:scale-[1.02]">
-            <p className="text-sm font-medium opacity-80 mb-1">Total Squad Power (USD)</p>
-            <h3 className="text-4xl font-black">$ {(balances.total / 120).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
-          </div>
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <p className="text-sm text-gray-500 font-bold mb-1">bKash (Real)</p>
-            <h3 className="text-2xl font-black text-gray-800">৳ {balances.bkash.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
-          </div>
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <p className="text-sm text-gray-500 font-bold mb-1">Nagad (Real)</p>
-            <h3 className="text-2xl font-black text-gray-800">৳ {balances.nagad.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-10">
-          
-          {/* 🔴 SECTION 1: Manage Squad Funds (Request & Pay Friends) */}
-          <div className="bg-white rounded-3xl p-8 shadow-lg border border-gray-100">
-            <h3 className="text-xl font-black text-gray-900 mb-2">1. Manage Squad Funds</h3>
-            <p className="text-gray-500 text-sm mb-6">Request contributions to boost your balance, or pay your squad directly.</p>
-            
-            <div className="space-y-4">
-              {squad.map((member) => (
-                <div key={member.id} className="flex flex-col sm:flex-row items-center justify-between p-4 border border-gray-100 rounded-2xl hover:bg-gray-50 transition-colors gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-inner flex-shrink-0 ${member.avatarColor}`}>
-                    {member.initials}
-                  </div>
-                  <div className="flex-1 text-center sm:text-left">
-                    <h4 className="text-md font-bold text-gray-900">{member.name}</h4>
-                  </div>
-                  <div className="w-full sm:w-24 relative">
-                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 font-bold text-sm">$</span>
-                    <input 
-                      type="number" min="1" step="0.1" value={member.inputAmount} 
-                      onChange={(e) => handleAmountChange(member.id, e.target.value)}
-                      disabled={member.hasContributed || member.isLoadingRequest || member.hasPaid}
-                      className="w-full pl-7 pr-2 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-gray-900 disabled:bg-gray-100 text-sm"
-                    />
-                  </div>
-                  
-                  {/* 🔴 NEW: Action Buttons (Request & Pay) */}
-                  <div className="flex gap-2 w-full sm:w-auto">
-                    <button
-                      onClick={() => handleRequestFunds(member.id, member.name, member.inputAmount)}
-                      disabled={member.isLoadingRequest || member.hasContributed || member.hasPaid || isAnalyzing}
-                      className={`flex-1 sm:flex-none px-4 py-2 rounded-lg font-bold text-sm transition-all shadow-sm
-                        ${member.hasContributed 
-                          ? 'bg-green-50 text-green-600 cursor-not-allowed' 
-                          : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
-                        }
-                      `}
-                    >
-                      {member.isLoadingRequest ? "..." : member.hasContributed ? "Added ✓" : "Request"}
-                    </button>
-
-                    <button
-                      onClick={() => initiateFriendPayment(member)}
-                      disabled={member.isLoadingRequest || member.hasContributed || member.hasPaid || isAnalyzing}
-                      className={`flex-1 sm:flex-none px-4 py-2 rounded-lg font-bold text-sm transition-all shadow-sm
-                        ${member.hasPaid 
-                          ? 'bg-gray-100 text-gray-500 cursor-not-allowed' 
-                          : 'bg-blue-600 text-white hover:bg-blue-500'
-                        }
-                      `}
-                    >
-                      {member.hasPaid ? "Paid ✓" : "Pay"}
-                    </button>
-                  </div>
+        {/* Header */}
+        <div className="mb-10 p-8 rounded-3xl bg-gradient-to-br from-purple-900/40 via-slate-900/80 to-slate-900 border border-purple-500/20 shadow-[0_0_40px_rgba(168,85,247,0.1)] relative overflow-hidden backdrop-blur-xl">
+          <div className="absolute top-0 right-0 w-72 h-72 bg-purple-400/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-12 h-12 rounded-2xl bg-purple-500/20 flex items-center justify-center border border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.3)]">
+                  <span className="text-2xl">⚡</span>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 🔴 SECTION 2: Checkout Shared Bill (Pay on Website) */}
-          <div className="bg-gradient-to-br from-gray-900 to-indigo-900 rounded-3xl p-8 shadow-2xl text-white">
-            <h3 className="text-xl font-black mb-2 flex items-center gap-2">2. Pay Shared Bill 🤖</h3>
-            <p className="text-indigo-200 text-sm mb-6">Enter the merchant link. Our AI will secure the shared transaction.</p>
-
-            <div className="flex flex-col gap-4">
-              <div>
-                <label className="block text-xs font-bold text-indigo-300 uppercase tracking-wider mb-2">Checkout Link</label>
-                <input 
-                  type="url" value={websiteLink} onChange={(e) => setWebsiteLink(e.target.value)} 
-                  placeholder="e.g., https://netflix.com" 
-                  className="w-full px-5 py-3 rounded-xl text-gray-900 focus:outline-none focus:ring-4 focus:ring-blue-500/50" 
-                />
-              </div>
-              
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-xs font-bold text-indigo-300 uppercase tracking-wider mb-2">Total Bill</label>
-                  <input 
-                    type="number" step="0.01" min="0.1" value={checkoutAmount} onChange={(e) => setCheckoutAmount(e.target.value)} 
-                    className="w-full px-4 py-3 rounded-xl text-gray-900 focus:outline-none focus:ring-4 focus:ring-blue-500/50 font-bold text-center" 
-                  />
-                </div>
-                <div className="w-32">
-                  <label className="block text-xs font-bold text-indigo-300 uppercase tracking-wider mb-2">Currency</label>
-                  <select 
-                    value={currency} onChange={(e) => setCurrency(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl text-gray-900 focus:outline-none focus:ring-4 focus:ring-blue-500/50 font-bold cursor-pointer"
-                  >
-                    <option value="USD">USD ($)</option>
-                    <option value="EUR">EUR (€)</option>
-                    <option value="GBP">GBP (£)</option>
-                  </select>
+                <div>
+                  <h2 className="text-3xl font-black text-white tracking-tight">Squad Pay</h2>
+                  <p className="text-purple-300/70 text-sm font-medium">Pool funds with your team for unified global payments.</p>
                 </div>
               </div>
-
-              <button 
-                onClick={initiateWebsitePayment} 
-                disabled={!websiteLink || !checkoutAmount || isAnalyzing} 
-                className="mt-4 bg-blue-600 hover:bg-blue-500 text-white font-bold px-10 py-4 rounded-xl disabled:opacity-70 transition-all shadow-lg flex items-center justify-center gap-2 w-full"
-              >
-                {isAnalyzing && !activeMember ? "Analyzing Merchant..." : "Scan & Pay Bill"}
-              </button>
+              <p className="text-slate-400 text-sm max-w-xl leading-relaxed">
+                Create a payment pool → share the code with your squad → everyone contributes their share → one unified virtual card is generated for checkout.
+              </p>
+            </div>
+            <div className="flex gap-8 flex-shrink-0">
+              <div className="text-center">
+                <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Your Balance</p>
+                <p className="text-2xl font-bold text-white">৳{balances.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                <p className="text-xs text-slate-500 font-medium mt-1">${balances.total_usd.toFixed(2)} USD</p>
+              </div>
             </div>
           </div>
-
         </div>
+
+        {/* Tabs */}
+        <div className="flex gap-2 mb-8 bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800/50 w-fit">
+          {(["create", "join", "my-pools"] as Tab[]).map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              className={`px-6 py-2.5 rounded-xl text-sm font-bold capitalize transition-all ${activeTab === tab ? "bg-purple-600 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]" : "text-slate-400 hover:text-white"}`}>
+              {tab === "create" ? "✦ Create Pool" : tab === "join" ? "🔗 Join Pool" : "📋 My Pools"}
+            </button>
+          ))}
+        </div>
+
+        {/* ─────────────── TAB: CREATE POOL ─────────────── */}
+        {activeTab === "create" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-slate-900/50 backdrop-blur-xl rounded-3xl p-8 border border-slate-800/50 shadow-2xl">
+              {createStep === "form" && (
+                <>
+                  <h3 className="text-xl font-bold text-white mb-2">Create a Payment Pool</h3>
+                  <p className="text-slate-400 text-sm mb-8">Set up a fund pool for your squad. Share the pool code so members can contribute their share.</p>
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">What are you paying for?</label>
+                      <input type="text" value={createForm.description} onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))}
+                        placeholder="e.g. GitHub Copilot yearly plan for our team"
+                        className="w-full px-5 py-4 rounded-2xl bg-slate-950/50 border border-slate-800 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all placeholder:text-slate-600 shadow-inner" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Merchant / Checkout URL</label>
+                      <input type="url" value={createForm.target_url} onChange={e => setCreateForm(f => ({ ...f, target_url: e.target.value }))}
+                        placeholder="https://github.com/features/copilot"
+                        className="w-full px-5 py-4 rounded-2xl bg-slate-950/50 border border-slate-800 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all placeholder:text-slate-600 shadow-inner" />
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="flex-1">
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Total Amount</label>
+                        <input type="number" step="0.01" min="0.1" value={createForm.total_amount} onChange={e => setCreateForm(f => ({ ...f, total_amount: e.target.value }))}
+                          placeholder="30.00"
+                          className="w-full px-5 py-4 rounded-2xl bg-slate-950/50 border border-slate-800 text-white font-bold focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all shadow-inner" />
+                      </div>
+                      <div className="w-28">
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Currency</label>
+                        <select value={createForm.currency} onChange={e => setCreateForm(f => ({ ...f, currency: e.target.value }))}
+                          className="w-full px-4 py-4 rounded-2xl bg-slate-950/50 border border-slate-800 text-white font-bold focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all cursor-pointer shadow-inner">
+                          {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    {createForm.total_amount && createForm.currency !== "BDT" && (
+                      <p className="text-slate-500 text-xs font-medium px-1">
+                        ≈ <span className="text-white">৳{(parseFloat(createForm.total_amount) * (rates[createForm.currency] || 1)).toLocaleString(undefined, { maximumFractionDigits: 2 })} BDT</span> total pool size
+                      </p>
+                    )}
+                    <button onClick={handleScanUrl} disabled={!createForm.target_url || !createForm.total_amount || isAnalyzing}
+                      className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-2xl transition-all disabled:opacity-50 shadow-[0_0_20px_rgba(168,85,247,0.3)] hover:shadow-[0_0_25px_rgba(168,85,247,0.5)]">
+                      {isAnalyzing ? "Analyzing security..." : "Verify & Create Pool →"}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {createStep === "scan" && scanResult && (
+                <>
+                  <h3 className="text-xl font-bold text-white mb-6">Security Report</h3>
+                  <div className={`p-5 rounded-2xl border mb-6 ${scanResult.type === "success" ? "bg-emerald-900/20 border-emerald-500/30 text-emerald-400" : "bg-red-900/20 border-red-500/30 text-red-400"}`}>
+                    <p className="text-sm font-bold">{scanResult.text}</p>
+                    {scanResult.score >= 0 && (
+                      <div className="mt-4 w-full bg-slate-900 rounded-full h-2 overflow-hidden">
+                        <div className={`h-full ${scoreColor(scanResult.score)} transition-all duration-1000`} style={{ width: `${scanResult.score}%` }} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-5 rounded-2xl bg-slate-800/30 border border-slate-700/30 mb-6 space-y-2">
+                    <p className="text-xs text-slate-400"><span className="text-white font-bold">URL:</span> {createForm.target_url}</p>
+                    <p className="text-xs text-slate-400"><span className="text-white font-bold">Amount:</span> {createForm.total_amount} {createForm.currency}</p>
+                    <p className="text-xs text-slate-400"><span className="text-white font-bold">For:</span> {createForm.description || "—"}</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={() => { setCreateStep("form"); setScanResult(null); }} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-2xl transition-all">← Back</button>
+                    <button onClick={handleCreatePool}
+                      className={`flex-1 font-bold py-4 rounded-2xl transition-all ${scanResult.score < 60 ? "bg-amber-600 hover:bg-amber-500 text-white" : "bg-purple-600 hover:bg-purple-500 text-white shadow-[0_0_20px_rgba(168,85,247,0.3)]"}`}>
+                      {scanResult.score < 60 ? "⚠️ Create Anyway" : "✦ Create Pool"}
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {createStep === "done" && createdPool && (
+                <>
+                  <div className="text-center mb-8">
+                    <div className="w-16 h-16 bg-purple-500/20 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-purple-500/30 shadow-[0_0_20px_rgba(168,85,247,0.3)] text-2xl">✅</div>
+                    <h3 className="text-2xl font-bold text-white mb-2">Pool Created!</h3>
+                    <p className="text-slate-400 text-sm">Share this code with your squad members.</p>
+                  </div>
+                  <div className="p-6 rounded-2xl bg-purple-900/20 border border-purple-500/30 text-center mb-6">
+                    <p className="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-2">Pool Code</p>
+                    <p className="text-4xl font-black text-white tracking-widest font-mono">{createdPool.pool_code}</p>
+                    <button onClick={() => { navigator.clipboard.writeText(createdPool.pool_code); alert("Copied!"); }}
+                      className="mt-3 text-xs text-purple-400 hover:text-purple-300 font-bold transition-colors">📋 Copy Code</button>
+                  </div>
+                  <div className="p-5 rounded-2xl bg-slate-800/30 border border-slate-700/30 mb-6 space-y-3">
+                    <div className="flex justify-between"><span className="text-xs text-slate-400">Target</span><span className="text-xs text-white font-bold">{createdPool.target_url.replace(/^https?:\/\//, '')}</span></div>
+                    <div className="flex justify-between"><span className="text-xs text-slate-400">Total</span><span className="text-xs text-white font-bold">{createdPool.total_amount} {createdPool.currency}</span></div>
+                    <div className="flex justify-between"><span className="text-xs text-slate-400">≈ BDT</span><span className="text-xs text-white font-bold">৳{createdPool.total_bdt.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-xs text-slate-400">Status</span><span className="text-xs font-bold text-purple-400">{createdPool.status}</span></div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={() => { setCreateStep("form"); setCreatedPool(null); setScanResult(null); setCreateForm({ description: "", target_url: "", total_amount: "", currency: "USD" }); }}
+                      className="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-3.5 rounded-2xl transition-all text-sm">Create Another</button>
+                    <button onClick={() => { setActiveTab("my-pools"); fetchMyPools(); }}
+                      className="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-bold py-3.5 rounded-2xl transition-all text-sm shadow-[0_0_15px_rgba(168,85,247,0.3)]">My Pools →</button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* How it works */}
+            <div className="bg-slate-900/30 backdrop-blur-xl rounded-3xl p-8 border border-slate-800/30">
+              <h3 className="text-lg font-bold text-white mb-6">How Squad Pay Works</h3>
+              <div className="space-y-5">
+                {[
+                  { icon: "✦", title: "1. Create a Pool", desc: "Set the merchant URL, total amount, and currency. Squad Pay verifies the merchant is safe." },
+                  { icon: "🔗", title: "2. Share the Code", desc: "Share your unique 8-character pool code with teammates via WhatsApp, Discord, etc." },
+                  { icon: "💳", title: "3. Squad Contributes", desc: "Each member joins with the pool code, verifies with PIN + OTP, and their share is deducted from their local wallet instantly." },
+                  { icon: "⚡", title: "4. Execute Payment", desc: "Once enough funds are collected, the Squad Leader executes to generate one unified virtual dollar card for checkout." },
+                ].map(s => (
+                  <div key={s.title} className="flex gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center flex-shrink-0 shadow-[0_0_10px_rgba(168,85,247,0.2)]">
+                      <span className="text-lg">{s.icon}</span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-white">{s.title}</p>
+                      <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{s.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-8 p-5 rounded-2xl bg-blue-900/10 border border-blue-500/20">
+                <p className="text-xs font-bold text-blue-400 mb-2">📌 Example</p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  3 devs want to buy a $30 GitHub Copilot plan. User A creates a $30 pool. B & C each join and contribute $10 from their bKash. A also chips in $10. Once $30 is pooled, A executes — and a <strong className="text-white">$30 virtual card</strong> is instantly generated!
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────── TAB: JOIN POOL ─────────────── */}
+        {activeTab === "join" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-slate-900/50 backdrop-blur-xl rounded-3xl p-8 border border-slate-800/50 shadow-2xl">
+              <h3 className="text-xl font-bold text-white mb-2">Join a Squad Pool</h3>
+              <p className="text-slate-400 text-sm mb-8">Enter the pool code shared by your squad leader to look up the pool and contribute your share.</p>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Pool Code</label>
+                  <div className="flex gap-3">
+                    <input type="text" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                      onKeyDown={e => e.key === "Enter" && handleLookupPool()}
+                      placeholder="SQUAD-XXXXXX"
+                      className="flex-1 px-5 py-4 rounded-2xl bg-slate-950/50 border border-slate-800 text-white font-mono font-bold text-lg focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all placeholder:text-slate-600 uppercase shadow-inner" />
+                    <button onClick={handleLookupPool} disabled={!joinCode.trim() || joinLoading}
+                      className="bg-purple-600 hover:bg-purple-500 text-white font-bold px-6 py-4 rounded-2xl transition-all disabled:opacity-50 shadow-[0_0_15px_rgba(168,85,247,0.3)]">
+                      {joinLoading ? "..." : "Find"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {joinedPool && (
+                <div className="mt-8 space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="p-5 rounded-2xl bg-slate-800/30 border border-slate-700/30 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-slate-400">Pool</span>
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${statusColor(joinedPool.status)}`}>{joinedPool.status}</span>
+                    </div>
+                    <div className="flex justify-between"><span className="text-xs text-slate-400">Leader</span><span className="text-xs text-white font-bold">@{joinedPool.leader}</span></div>
+                    <div className="flex justify-between"><span className="text-xs text-slate-400">For</span><span className="text-xs text-white font-bold">{joinedPool.description || joinedPool.target_url.replace(/^https?:\/\//, '')}</span></div>
+                    <div className="flex justify-between"><span className="text-xs text-slate-400">Total</span><span className="text-xs text-white font-bold">{joinedPool.total_amount} {joinedPool.currency}</span></div>
+                    <div className="flex justify-between"><span className="text-xs text-slate-400">Collected</span><span className="text-xs text-white font-bold">৳{joinedPool.collected_bdt.toLocaleString()} / ৳{joinedPool.total_bdt.toLocaleString()}</span></div>
+                    <div>
+                      <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden mt-2">
+                        <div className="h-full bg-purple-500 transition-all duration-1000 shadow-[0_0_8px_rgba(168,85,247,0.8)]" style={{ width: `${joinedPool.progress_pct}%` }} />
+                      </div>
+                      <p className="text-[10px] text-purple-400 font-bold mt-1 text-right">{joinedPool.progress_pct}% funded</p>
+                    </div>
+                  </div>
+
+                  {joinedPool.contributions.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2">Contributors</p>
+                      <div className="space-y-2">
+                        {joinedPool.contributions.map((c, i) => (
+                          <div key={i} className="flex justify-between items-center p-3 bg-slate-800/30 rounded-xl border border-slate-700/30">
+                            <span className="text-sm text-white font-bold">@{c.username}</span>
+                            <span className="text-sm text-purple-400 font-bold">৳{c.amount_bdt.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {joinedPool.status === "OPEN" && (
+                    <button onClick={() => openVerify("contribute", joinedPool.pool_code)}
+                      className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(168,85,247,0.3)]">
+                      ⚡ Contribute My Share
+                    </button>
+                  )}
+                  {joinedPool.status === "COMPLETED" && joinedPool.virtual_card && (
+                    <div className="p-5 rounded-2xl bg-emerald-900/20 border border-emerald-500/30 text-center">
+                      <p className="text-xs text-emerald-400 font-bold uppercase tracking-widest mb-2">Pool Completed!</p>
+                      <p className="text-white font-bold font-mono tracking-widest">{joinedPool.virtual_card}</p>
+                      <p className="text-slate-400 text-xs mt-1">Card was generated for this pool.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-slate-900/30 backdrop-blur-xl rounded-3xl p-8 border border-slate-800/30">
+              <h3 className="text-lg font-bold text-white mb-6">Your Share Calculator</h3>
+              {joinedPool ? (
+                <div className="space-y-6">
+                  <div className="p-6 rounded-2xl bg-purple-900/20 border border-purple-500/30 text-center">
+                    <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-2">Remaining to Fund</p>
+                    <p className="text-4xl font-black text-white">{joinedPool.remaining_amount.toFixed(2)} {joinedPool.currency}</p>
+                    <p className="text-sm text-slate-400 mt-1 font-medium">৳{joinedPool.remaining_bdt.toLocaleString()} BDT</p>
+                  </div>
+                  <div className="p-5 rounded-2xl bg-slate-800/30 border border-slate-700/30 space-y-2">
+                    <p className="text-xs text-slate-400">Your bKash: <span className="text-white font-bold">৳{balances.bkash.toLocaleString()}</span></p>
+                    <p className="text-xs text-slate-400">Your Nagad: <span className="text-white font-bold">৳{balances.nagad.toLocaleString()}</span></p>
+                    <p className="text-xs text-slate-400 pt-2 border-t border-slate-700">Available: <span className="text-emerald-400 font-bold">৳{balances.total.toLocaleString()}</span></p>
+                  </div>
+                  {balances.total < joinedPool.remaining_bdt && (
+                    <div className="p-4 rounded-xl bg-amber-900/20 border border-amber-500/30">
+                      <p className="text-xs text-amber-400 font-bold">⚠️ You can contribute your full balance of ৳{balances.total.toLocaleString()} towards this pool.</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-48 text-slate-600">
+                  <p className="text-sm">Enter a pool code to see details</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────── TAB: MY POOLS ─────────────── */}
+        {activeTab === "my-pools" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-slate-900/50 backdrop-blur-xl rounded-3xl p-8 border border-slate-800/50 shadow-2xl">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold text-white">Your Pools</h3>
+                <button onClick={fetchMyPools} className="text-xs text-purple-400 hover:text-purple-300 font-bold transition-colors">↻ Refresh</button>
+              </div>
+              {myPoolsLoading ? (
+                <div className="flex items-center justify-center h-48 text-slate-500"><p className="text-sm">Loading...</p></div>
+              ) : myPools.length === 0 ? (
+                <div className="flex items-center justify-center h-48 text-slate-500 flex-col gap-3">
+                  <span className="text-3xl">⚡</span>
+                  <p className="text-sm">No squad pools yet. Create one!</p>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+                  {myPools.map(pool => (
+                    <button key={pool.pool_code} onClick={async () => {
+                      const res = await fetch(`${API}/api/squad/pool/${pool.pool_code}`);
+                      if (res.ok) setSelectedPool(await res.json());
+                    }}
+                      className={`w-full text-left p-5 rounded-2xl border transition-all hover:border-purple-500/50 hover:bg-slate-800/50 ${selectedPool?.pool_code === pool.pool_code ? "border-purple-500/50 bg-slate-800/50" : "border-slate-700/30 bg-slate-800/20"}`}>
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <p className="text-xs font-mono font-bold text-purple-400">{pool.pool_code}</p>
+                          <p className="text-sm font-bold text-white mt-0.5">{pool.description || pool.target_url.replace(/^https?:\/\//, '')}</p>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full border flex-shrink-0 ml-2 ${statusColor(pool.status)}`}>{pool.status}</span>
+                      </div>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs text-slate-400">{pool.total_amount} {pool.currency} • {pool.is_leader ? "👑 Leader" : "👤 Member"}</span>
+                        <span className="text-xs text-slate-400">{pool.date}</span>
+                      </div>
+                      <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
+                        <div className="h-full bg-purple-500 transition-all duration-500" style={{ width: `${pool.progress_pct}%` }} />
+                      </div>
+                      <p className="text-[10px] text-purple-400/70 font-bold mt-1 text-right">{pool.progress_pct}%</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Pool Detail Panel */}
+            <div className="bg-slate-900/50 backdrop-blur-xl rounded-3xl p-8 border border-slate-800/50 shadow-2xl">
+              {!selectedPool ? (
+                <div className="flex items-center justify-center h-full text-slate-500 flex-col gap-3">
+                  <span className="text-3xl">👈</span>
+                  <p className="text-sm">Select a pool to see details</p>
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <p className="text-xs font-mono font-bold text-purple-400 mb-1">{selectedPool.pool_code}</p>
+                      <h3 className="text-xl font-bold text-white">{selectedPool.description || selectedPool.target_url.replace(/^https?:\/\//, '')}</h3>
+                    </div>
+                    <span className={`text-xs font-bold px-3 py-1.5 rounded-full border flex-shrink-0 ml-3 ${statusColor(selectedPool.status)}`}>{selectedPool.status}</span>
+                  </div>
+
+                  {/* Progress */}
+                  <div className="p-5 rounded-2xl bg-purple-900/20 border border-purple-500/20 mb-6">
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="text-[10px] text-purple-400 font-bold uppercase tracking-widest">Pool Progress</span>
+                      <span className="text-sm font-bold text-white">{selectedPool.progress_pct}%</span>
+                    </div>
+                    <div className="w-full bg-slate-900 rounded-full h-3 overflow-hidden mb-3">
+                      <div className="h-full bg-gradient-to-r from-purple-600 to-fuchsia-500 transition-all duration-1000 shadow-[0_0_10px_rgba(168,85,247,0.6)]" style={{ width: `${selectedPool.progress_pct}%` }} />
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-400">Collected: <strong className="text-white">৳{selectedPool.collected_bdt.toLocaleString()}</strong></span>
+                      <span className="text-slate-400">Total: <strong className="text-white">৳{selectedPool.total_bdt.toLocaleString()}</strong></span>
+                    </div>
+                  </div>
+
+                  {/* Info grid */}
+                  <div className="grid grid-cols-2 gap-3 mb-6">
+                    <div className="p-4 rounded-xl bg-slate-800/30 border border-slate-700/30">
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Target</p>
+                      <p className="text-sm text-white font-bold truncate">{selectedPool.total_amount} {selectedPool.currency}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-800/30 border border-slate-700/30">
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Leader</p>
+                      <p className="text-sm text-white font-bold">@{selectedPool.leader}</p>
+                    </div>
+                  </div>
+
+                  {/* Contributors */}
+                  {selectedPool.contributions.length > 0 && (
+                    <div className="mb-6">
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-3">Contributors ({selectedPool.contributions.length})</p>
+                      <div className="space-y-2 max-h-36 overflow-y-auto">
+                        {selectedPool.contributions.map((c, i) => (
+                          <div key={i} className="flex justify-between items-center p-3 bg-slate-800/30 rounded-xl border border-slate-700/30">
+                            <span className="text-sm text-white font-bold">@{c.username}</span>
+                            <span className="text-sm text-purple-400 font-bold">৳{c.amount_bdt.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Completed card */}
+                  {selectedPool.status === "COMPLETED" && selectedPool.virtual_card && (
+                    <div className="p-5 rounded-2xl bg-emerald-900/20 border border-emerald-500/30 text-center mb-4">
+                      <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest mb-2">Virtual Card Generated!</p>
+                      <p className="text-white font-bold font-mono tracking-widest text-lg">{selectedPool.virtual_card}</p>
+                      <p className="text-slate-400 text-xs mt-1">Expiry: {selectedPool.expiry} • CVV: {selectedPool.cvv}</p>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  {selectedPool.status === "OPEN" && selectedPool.leader === username && (
+                    <button onClick={() => openVerify("execute", selectedPool.pool_code)}
+                      className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(168,85,247,0.3)]">
+                      ⚡ Execute Pool Payment
+                    </button>
+                  )}
+                  {selectedPool.status === "FUNDED" && selectedPool.leader === username && (
+                    <button onClick={() => openVerify("execute", selectedPool.pool_code)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+                      🚀 Generate Unified Card
+                    </button>
+                  )}
+                  {selectedPool.status === "OPEN" && selectedPool.leader !== username && (
+                    <button onClick={() => openVerify("contribute", selectedPool.pool_code)}
+                      className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(168,85,247,0.3)]">
+                      ⚡ Contribute My Share
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </main>
 
-      <PaymentModal isOpen={isPaymentOpen} onClose={() => setIsPaymentOpen(false)} cardNumber={generatedCard} />
-
-      {/* 🔴 PIN & OTP Verification Modal (Dynamic Text for Friend vs Website) */}
-      {isVerificationOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl relative">
-            <button onClick={() => { setIsVerificationOpen(false); setActiveMember(null); }} className="absolute top-4 right-4 text-gray-400 hover:text-red-500 font-bold text-xl">✕</button>
-            
-            <h3 className="text-2xl font-black text-gray-900 mb-2">Authorize Payment</h3>
-            
-            {/* Dynamic Text Rendering */}
-            <p className="text-gray-500 font-medium mb-6">
-              {activeMember ? (
-                <>You are paying <strong>${parseFloat(activeMember.inputAmount as string).toFixed(2)}</strong> directly to <strong>{activeMember.name}</strong>.</>
-              ) : (
-                <>You are paying <strong>${parseFloat(checkoutAmount as string).toFixed(2)} {currency}</strong> on a merchant site.</>
-              )}
-              <br/>
-              Please enter your app PIN and OTP. <span className="text-xs text-blue-500 font-bold">(Demo PIN: 1234, OTP: 123456)</span>
+      {/* ─────── Verification Modal ─────── */}
+      {isVerifying && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
+          <div className="bg-slate-900 border border-slate-700/50 rounded-3xl p-8 max-w-sm w-full shadow-2xl relative">
+            <button onClick={() => setIsVerifying(false)} className="absolute top-6 right-6 text-slate-500 hover:text-white transition-colors">✕</button>
+            <h3 className="text-xl font-bold text-white mb-1">
+              {verifyTarget === "contribute" ? "Confirm Contribution" : "Execute Pool Payment"}
+            </h3>
+            <p className="text-slate-400 text-sm mb-8 font-medium">
+              {verifyTarget === "contribute" ? "Your share will be deducted from your wallet." : "Remaining balance (if any) will be deducted from your wallet and the virtual card will be generated."}
             </p>
-             
+
+            {authDemoOtp && (
+              <div className="bg-purple-900/20 border border-purple-500/30 rounded-2xl p-5 mb-8 text-center">
+                <p className="text-[10px] text-purple-400 font-bold tracking-widest uppercase">Auth Code (••••{authPhone})</p>
+                <p className="text-4xl font-black text-white tracking-[0.2em] mt-3">{authDemoOtp}</p>
+              </div>
+            )}
+
             <div className="space-y-5 mb-8">
               <div>
-                <label className="block text-gray-700 text-sm font-bold mb-2">4-Digit PIN</label>
-                <input type="password" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))} className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 text-center tracking-[0.5em] font-black text-xl outline-none" placeholder="••••" />
+                <label className="block text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Your PIN</label>
+                <input ref={pinRef} type="password" maxLength={4} value={authPin}
+                  onChange={e => setAuthPin(e.target.value.replace(/\D/g, ""))}
+                  onKeyDown={e => e.key === "Enter" && authPin.length === 4 && otpRef.current?.focus()}
+                  className="w-full px-4 py-4 bg-slate-950/50 border border-slate-800 rounded-2xl focus:ring-2 focus:ring-purple-500/50 text-center tracking-[0.5em] font-black text-2xl text-white outline-none shadow-inner"
+                  placeholder="••••" autoFocus />
               </div>
               <div>
-                <label className="block text-gray-700 text-sm font-bold mb-2">6-Digit OTP</label>
-                <div className="flex gap-2">
-                  <input type="text" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 text-center tracking-[0.5em] font-mono outline-none" placeholder="••••••" />
-                  <button type="button" className="bg-blue-100 text-blue-600 font-bold px-4 rounded-xl hover:bg-blue-200 text-sm whitespace-nowrap">Get OTP</button>
-                </div>
+                <label className="block text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">OTP Code</label>
+                <input ref={otpRef} type="text" maxLength={6} value={authOtp}
+                  onChange={e => setAuthOtp(e.target.value.replace(/\D/g, ""))}
+                  onKeyDown={e => e.key === "Enter" && authPin.length === 4 && authOtp.length === 6 && handleVerifySubmit()}
+                  className="w-full px-4 py-4 bg-slate-950/50 border border-slate-800 rounded-2xl focus:ring-2 focus:ring-purple-500/50 text-center tracking-[0.5em] font-mono text-xl font-bold text-white outline-none shadow-inner"
+                  placeholder="••••••" />
               </div>
             </div>
-
-            <button onClick={executePayment} disabled={pin.length < 4 || otp.length < 6} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed text-lg">
-              Verify & Send Funds
+            <button onClick={handleVerifySubmit} disabled={authPin.length < 4 || authOtp.length < 6}
+              className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-2xl transition-all disabled:opacity-50 shadow-[0_0_20px_rgba(168,85,247,0.3)]">
+              {verifyTarget === "contribute" ? "⚡ Confirm Contribution" : "🚀 Generate Unified Card"}
             </button>
           </div>
         </div>
       )}
+
+      <PaymentModal isOpen={isPaymentOpen} onClose={() => setIsPaymentOpen(false)} card={card} />
     </div>
   );
 }

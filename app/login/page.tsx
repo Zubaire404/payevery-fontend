@@ -1,124 +1,138 @@
 "use client";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link"; // 🔴 NEW: Link ইমপোর্ট করা হয়েছে
+import Link from "next/link";
+
+const API = "http://127.0.0.1:8000";
 
 export default function Login() {
-  // 🔴 FIX: ডিফল্ট নাম ফাঁকা রাখা হলো
+  const [step, setStep] = useState<1 | 2>(1);
   const [username, setUsername] = useState("");
   const [pin, setPin] = useState("");
+  const [otp, setOtp] = useState("");
+  const [demoOtp, setDemoOtp] = useState("");
+  const [phone, setPhone] = useState("");
   const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Refs for Enter-key navigation
+  const pinRef = useRef<HTMLInputElement>(null);
+  const loginBtnRef = useRef<HTMLButtonElement>(null);
+  const otpRef = useRef<HTMLInputElement>(null);
+
+  const handleStep1 = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setError("");
-    
-    if (!username.trim() || pin.length < 4) {
-      setError("⚠️ Please enter a valid username and 4-digit PIN.");
-      return;
-    }
+    if (!username.trim() || pin.length < 4) { setError("Enter a valid username and 4-digit PIN."); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/auth/login-step1`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim().toLowerCase(), pin }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.detail); return; }
+      setDemoOtp(data.demo_otp || "");
+      setPhone(data.phone || "");
+      setStep(2);
+    } catch { setError("Cannot reach server. Is the backend running?"); }
+    finally { setLoading(false); }
+  };
 
-    setIsLoading(true);
-
-    // Security Check (Hackathon Demo)
-    setTimeout(() => {
-      if (pin === "1234") {
-        localStorage.setItem("loggedInUser", username);
-        router.push("/dashboard");
-      } else {
-        setError("❌ Invalid PIN! Please use the demo PIN: 1234");
-        setPin(""); // ভুল পিন দিলে বক্স ফাঁকা করে দেবে
-        setIsLoading(false);
-      }
-    }, 1500); 
+  const handleStep2 = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (otp.length < 6) return;
+    setError(""); setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/auth/login-step2`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim().toLowerCase(), otp }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.detail); return; }
+      localStorage.setItem("loggedInUser", data.username);
+      router.push("/dashboard");
+    } catch { setError("Cannot reach server. Is the backend running?"); }
+    finally { setLoading(false); }
   };
 
   return (
-    <div className="min-h-screen bg-[#f4f7fe] flex items-center justify-center p-4 relative overflow-hidden">
-      
-      {/* Background Decorative Elements */}
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
-      <div className="absolute top-[-10%] right-[-10%] w-96 h-96 bg-indigo-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
-      <div className="absolute bottom-[-20%] left-[20%] w-96 h-96 bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+      {/* Deep Space Glowing Orbs */}
+      <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600 rounded-full blur-[150px] opacity-20 pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-indigo-600 rounded-full blur-[150px] opacity-20 pointer-events-none" />
 
-      <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-10 w-full max-w-md relative z-10 border border-gray-100">
-        
-        {/* Logo & Header */}
-        <div className="flex flex-col items-center mb-10">
-          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white font-black text-3xl shadow-lg mb-4 transform transition-transform hover:scale-105">
-            P
-          </div>
-          <h1 className="text-3xl font-extrabold text-gray-900">Pay<span className="text-blue-600">Every</span></h1>
-          <p className="text-gray-500 font-medium mt-2 text-center">Secure AI-powered payments for squads & professionals.</p>
+      {/* Glassmorphic Login Card */}
+      <div className="bg-slate-900/50 backdrop-blur-2xl rounded-3xl shadow-2xl p-8 sm:p-10 w-full max-w-md relative z-10 border border-slate-800/50">
+        <div className="flex flex-col items-center mb-8">
+          <img src="/logo.png" alt="PayEvery Logo" className="w-32 h-32 object-contain -mt-16 -mb-4 drop-shadow-[0_0_20px_rgba(59,130,246,0.5)] relative z-10" />
+          <h1 className="text-3xl font-extrabold text-white tracking-tight z-10">Pay<span className="text-blue-500">Every</span></h1>
+          <p className="text-slate-400 text-sm mt-1 text-center z-10 font-medium">Secure AI-powered payments.</p>
         </div>
 
-        {/* Login Form */}
-        <form onSubmit={handleLogin} className="space-y-6">
-          
-          <div>
-            <label className="block text-gray-700 text-sm font-bold mb-2 uppercase tracking-wide">Username</label>
-            <input 
-              type="text" 
-              value={username} 
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-5 py-4 border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 font-bold text-gray-900 outline-none transition-all" 
-              placeholder="e.g., Sohel, Rifat, Ratul" 
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-gray-700 text-sm font-bold mb-2 uppercase tracking-wide">4-Digit PIN</label>
-            <input 
-              type="password" 
-              maxLength={4}
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-              className="w-full px-5 py-4 border border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 text-center tracking-[0.5em] font-black text-2xl outline-none transition-all" 
-              placeholder="••••" 
-              required
-            />
-            <p className="text-xs text-blue-500 mt-2 font-bold text-right">(Demo PIN: 1234)</p>
-          </div>
-
-          {error && (
-            <div className="bg-red-50 text-red-600 font-bold p-4 rounded-xl border border-red-200 text-sm flex items-center gap-2 animate-pulse">
-              {error}
+        {step === 1 ? (
+          <form onSubmit={handleStep1} className="space-y-6">
+            <div>
+              <label className="block text-slate-400 text-xs font-bold mb-2 uppercase tracking-widest">Username</label>
+              <input
+                type="text" value={username}
+                onChange={e => setUsername(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && pinRef.current?.focus()}
+                className="w-full px-5 py-4 bg-slate-950/50 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-white font-medium outline-none transition-all placeholder-slate-600 shadow-inner"
+                placeholder="e.g., sohel, rifat, ratul" autoFocus />
             </div>
-          )}
+            <div>
+              <label className="block text-slate-400 text-xs font-bold mb-2 uppercase tracking-widest">4-Digit PIN</label>
+              <input
+                ref={pinRef} type="password" maxLength={4} value={pin}
+                onChange={e => setPin(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={e => { if (e.key === "Enter" && pin.length === 4 && username.trim()) loginBtnRef.current?.click(); }}
+                className="w-full px-5 py-4 bg-slate-950/50 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-center tracking-[0.75em] font-black text-2xl text-white outline-none transition-all placeholder-slate-600 shadow-inner"
+                placeholder="••••" />
+              <p className="text-xs text-blue-500/80 mt-2 text-right font-medium">(Demo PIN: 1234)</p>
+            </div>
+            {error && <p className="bg-red-500/10 text-red-400 font-medium p-4 rounded-xl border border-red-500/20 text-sm">{error}</p>}
+            <button ref={loginBtnRef} type="submit" disabled={loading || pin.length < 4 || !username.trim()}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-50 text-lg shadow-[0_0_20px_rgba(37,99,235,0.3)] hover:shadow-[0_0_25px_rgba(37,99,235,0.5)] flex items-center justify-center gap-2">
+              {loading ? "Verifying..." : "Secure Login →"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleStep2} className="space-y-6">
+            {demoOtp && (
+              <div className="bg-blue-900/20 border border-blue-500/30 rounded-2xl p-5 text-center shadow-inner">
+                <p className="text-xs text-blue-400 font-bold mb-1 uppercase tracking-widest">SMS sent to ••••{phone}</p>
+                <p className="text-5xl font-black text-white tracking-[0.2em] my-3 drop-shadow-md">{demoOtp}</p>
+                <p className="text-xs text-blue-300/70 font-medium">Copy this OTP and paste it below</p>
+              </div>
+            )}
+            <div>
+              <label className="block text-slate-400 text-xs font-bold mb-2 uppercase tracking-widest">Enter 6-Digit OTP</label>
+              <input
+                ref={otpRef} type="text" maxLength={6} value={otp} autoFocus
+                onChange={e => setOtp(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={e => { if (e.key === "Enter" && otp.length === 6) handleStep2(); }}
+                className="w-full px-5 py-4 bg-slate-950/50 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-center tracking-[0.5em] font-mono font-black text-3xl text-white outline-none transition-all placeholder-slate-700 shadow-inner"
+                placeholder="••••••" />
+            </div>
+            {error && <p className="bg-red-500/10 text-red-400 font-medium p-4 rounded-xl border border-red-500/20 text-sm">{error}</p>}
+            <button type="submit" disabled={loading || otp.length < 6}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-50 text-lg shadow-[0_0_20px_rgba(37,99,235,0.3)] hover:shadow-[0_0_25px_rgba(37,99,235,0.5)]">
+              {loading ? "Verifying..." : "Confirm & Login ✓"}
+            </button>
+            <button type="button" onClick={() => { setStep(1); setOtp(""); setError(""); }}
+              className="w-full text-sm font-medium text-slate-500 hover:text-slate-300 transition-colors py-2">← Back</button>
+          </form>
+        )}
 
-          <button 
-            type="submit" 
-            disabled={isLoading || pin.length < 4 || !username}
-            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-4 rounded-xl transition-all disabled:opacity-70 disabled:cursor-not-allowed text-lg shadow-lg hover:shadow-xl transform hover:-translate-y-1 flex items-center justify-center gap-2"
-          >
-            {isLoading ? (
-              <>
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Authenticating...
-              </>
-            ) : "Secure Login"}
-          </button>
-        </form>
-
-        {/* 🔴 FIX: Sign Up Link Added Back */}
-        <div className="mt-8 text-center pt-6 border-t border-gray-100">
-          <p className="text-sm text-gray-500 font-medium">
-            Don't have an account?{" "}
-            <Link 
-              href="/signup" 
-              className="text-blue-600 font-bold hover:text-blue-800 transition-colors"
-            >
-              Sign up now
-            </Link>
+        <div className="mt-8 text-center pt-6 border-t border-slate-800/50">
+          <p className="text-sm text-slate-400 font-medium">Don&apos;t have an account?{" "}
+            <Link href="/signup" className="text-blue-500 font-bold hover:text-blue-400 transition-colors">Sign up now</Link>
           </p>
         </div>
-
       </div>
     </div>
   );
