@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 
-const API = "http://https://payevery-backend.onrender.com/";
+const API = "https://payevery-backend.onrender.com";
 
 export default function SignUp() {
   const router = useRouter();

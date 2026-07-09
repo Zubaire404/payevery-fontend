@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import PaymentModal from "../components/PaymentModal";
 
-const API = "http://https://payevery-backend.onrender.com/";
+const API = "https://payevery-backend.onrender.com";
 const CURRENCIES = ["USD","BDT","EUR","GBP","INR"];
 
 interface CardDetails { number: string; expiry: string; cvv?: string; }

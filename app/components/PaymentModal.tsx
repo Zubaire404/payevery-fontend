@@ -16,7 +16,7 @@ export default function PaymentModal({ isOpen, onClose, card }: {
     setIsPaying(true);
     setStatus(null);
     try {
-      const res = await fetch("http://https://payevery-backend.onrender.com//api/charge-card", {
+      const res = await fetch("https://payevery-backend.onrender.com/api/charge-card", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ card_number: card.number }),
