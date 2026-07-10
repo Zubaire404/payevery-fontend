@@ -4,6 +4,7 @@
 ### 🌐 Live Deployment
 *   **Frontend App:** https://payevery-fontend.onrender.com
 *   **Backend API:** https://payevery-backend.onrender.com/docs
+*   **Pitch & Demo Video:** [Watch on OneDrive](https://1drv.ms/v/c/31d7390ef0504f11/IQBSWyXTqqmTSIVAC0va5F1sAe3iwJziCZx60ueBzsf0aEQ?e=vueR33)
 
 ### 📦 Repositories
 *   **Frontend Application:** https://github.com/Zubaire404/payevery-fontend
