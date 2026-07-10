@@ -3,6 +3,7 @@
 
 *   **Frontend Application :** https://github.com/Zubaire404/payevery-fontend
 *   **Backend :** https://github.com/Zubaire404/payevery-backend
+*   **Chrome Extension :** https://github.com/Zubaire404/payevery-extension
 
 ## 📖 Project Overview
 In South Asian nations like Bangladesh and Pakistan, major global payment networks and gateways like PayPal are completely unavailable. Furthermore, less than 5% of bank cards possess dual-currency/dollar endorsement capabilities, locking out the general youth. Thousands of talented student developers and freelancers cannot purchase essential global tech resources, subscription SaaS, server hosting, or crucial API credits required to learn or build global startups.
