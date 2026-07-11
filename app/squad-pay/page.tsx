@@ -179,7 +179,11 @@ export default function SquadPay() {
         body: JSON.stringify({ pool_code: verifyPoolCode, contributor_username: username, amount: parseFloat(contributeAmount), pin: authPin, otp: authOtp }),
       });
       const d = await res.json();
-      if (!res.ok) { alert(`❌ ${d.detail}`); return; }
+      if (!res.ok) { 
+        const err = typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail);
+        alert(`❌ ${err}`); 
+        return; 
+      }
       alert(`✅ ${d.message}`);
       setIsVerifying(false);
       fetchUser(username);
@@ -198,7 +202,11 @@ export default function SquadPay() {
         body: JSON.stringify({ pool_code: verifyPoolCode, leader_username: username, pin: authPin, otp: authOtp }),
       });
       const d = await res.json();
-      if (!res.ok) { alert(`❌ ${d.detail}`); return; }
+      if (!res.ok) { 
+        const err = typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail);
+        alert(`❌ ${err}`); 
+        return; 
+      }
       setCard({ number: d.virtual_card, expiry: d.expiry, cvv: d.cvv });
       setIsVerifying(false);
       fetchUser(username);
