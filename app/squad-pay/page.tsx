@@ -61,6 +61,7 @@ export default function SquadPay() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyTarget, setVerifyTarget] = useState<"contribute" | "execute" | null>(null);
   const [verifyPoolCode, setVerifyPoolCode] = useState("");
+  const [contributeAmount, setContributeAmount] = useState("");
 
   // --- Payment Card Modal ---
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
@@ -165,7 +166,7 @@ export default function SquadPay() {
   const openVerify = async (target: "contribute" | "execute", code: string) => {
     setVerifyTarget(target);
     setVerifyPoolCode(code);
-    setAuthPin(""); setAuthOtp(""); setAuthDemoOtp(""); setAuthPhone("");
+    setAuthPin(""); setAuthOtp(""); setAuthDemoOtp(""); setAuthPhone(""); setContributeAmount("");
     setIsVerifying(true);
     await requestOtp(username);
     setTimeout(() => pinRef.current?.focus(), 100);
@@ -175,7 +176,7 @@ export default function SquadPay() {
     try {
       const res = await fetch(`${API}/api/squad/contribute`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pool_code: verifyPoolCode, contributor_username: username, pin: authPin, otp: authOtp }),
+        body: JSON.stringify({ pool_code: verifyPoolCode, contributor_username: username, amount: parseFloat(contributeAmount), pin: authPin, otp: authOtp }),
       });
       const d = await res.json();
       if (!res.ok) { alert(`❌ ${d.detail}`); return; }
@@ -684,13 +685,22 @@ export default function SquadPay() {
             )}
 
             <div className="space-y-5 mb-8">
+              {verifyTarget === "contribute" && (
+                <div>
+                  <label className="block text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Contribution Amount (BDT)</label>
+                  <input type="number" value={contributeAmount}
+                    onChange={e => setContributeAmount(e.target.value)}
+                    className="w-full px-4 py-4 bg-slate-950/50 border border-slate-800 rounded-2xl focus:ring-2 focus:ring-purple-500/50 text-center font-bold text-xl text-white outline-none shadow-inner"
+                    placeholder="e.g. 500" autoFocus />
+                </div>
+              )}
               <div>
                 <label className="block text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">Your PIN</label>
                 <input ref={pinRef} type="password" maxLength={4} value={authPin}
                   onChange={e => setAuthPin(e.target.value.replace(/\D/g, ""))}
                   onKeyDown={e => e.key === "Enter" && authPin.length === 4 && otpRef.current?.focus()}
                   className="w-full px-4 py-4 bg-slate-950/50 border border-slate-800 rounded-2xl focus:ring-2 focus:ring-purple-500/50 text-center tracking-[0.5em] font-black text-2xl text-white outline-none shadow-inner"
-                  placeholder="••••" autoFocus />
+                  placeholder="••••" autoFocus={verifyTarget !== "contribute"} />
               </div>
               <div>
                 <label className="block text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2">OTP Code</label>
@@ -701,7 +711,7 @@ export default function SquadPay() {
                   placeholder="••••••" />
               </div>
             </div>
-            <button onClick={handleVerifySubmit} disabled={authPin.length < 4 || authOtp.length < 6}
+            <button onClick={handleVerifySubmit} disabled={authPin.length < 4 || authOtp.length < 6 || (verifyTarget === "contribute" && !contributeAmount)}
               className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-4 rounded-2xl transition-all disabled:opacity-50 shadow-[0_0_20px_rgba(168,85,247,0.3)]">
               {verifyTarget === "contribute" ? "⚡ Confirm Contribution" : "🚀 Generate Unified Card"}
             </button>
